@@ -2,15 +2,14 @@ import asyncio
 from google import genai
 from telegram import Bot
 from gtts import gTTS
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 import subprocess
 import os
 import json
-import time
 
 TELEGRAM_BOT_TOKEN = "8462003119:AAEjQU5Tk8Zyo2T36BnmpydAV7zSmdfJz6o"
 TELEGRAM_CHANNEL = "@ukrpulsenew"
-GEMINI_API_KEY = "VSTAV_SVIY_KLYUCH"
+GEMINI_API_KEY = "AIzaSyCAB0k3SKFKjsyUJ0lQY4_rPU3hMKXAJj8"
 DIGEST_FILE = "daily_digest.json"
 
 client_genai = genai.Client(api_key=GEMINI_API_KEY)
@@ -24,112 +23,84 @@ def load_digest():
 
 def create_script(news_list):
     news_text = "\n".join([f"{i+1}. {n}" for i, n in enumerate(news_list[:7])])
-    prompt = f"""Напиши сценарій для короткого відеовипуску новин (60 секунд) українською мовою.
-Формат: привітання, потім кожна новина 1-2 реченнями, завершення.
-Стиль: професійний диктор новин.
-Починай з "Доброго вечора, з вами УкрПульс."
-Заверши словами "Слідкуйте за нами, до зустрічі!"
-Не використовуй * ** _ __ для форматування.
-
-Новини дня:
-{news_text}"""
+    prompt = "Napishi stsenariy dlya korotkogo videovipusku novin (60 sekund) ukrainskoyu movoyu. Privitannya, kozhna novina 1-2 rechennyami, zavershennya. Stil: profesiyniy diktor. Pochinay: Dobrogo vechora, z vami UkrPuls. Zavershi: Slidkuyte za nami, do zustrichi! Bez * ** _ __. Novini:\n" + news_text
     try:
         response = client_genai.models.generate_content(model="gemini-2.5-flash", contents=prompt)
-        result = response.text.replace("**", "").replace("__", "")
-        return result
+        return response.text.replace("**", "").replace("__", "")
     except Exception as e:
-        print(f"Помилка Gemini: {e}")
+        print(f"Gemini error: {e}")
         return None
 
-def create_audio(text, filename="digest_audio.mp3"):
+def create_audio(text):
     tts = gTTS(text=text, lang='uk')
-    tts.save(filename)
-    return filename
+    tts.save("digest_audio.mp3")
+    return "digest_audio.mp3"
 
-def create_slide(text, index, total, width=1080, height=1920):
-    img = Image.new('RGB', (width, height), color=(10, 10, 40))
+def create_slide(text, index, total):
+    img = Image.new('RGB', (640, 360), color=(10, 10, 40))
     draw = ImageDraw.Draw(img)
-    try:
-        font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 48)
-        font_text = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 36)
-        font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 28)
-    except:
-        font_title = ImageFont.load_default()
-        font_text = ImageFont.load_default()
-        font_small = ImageFont.load_default()
-    draw.rectangle([(0, 0), (width, 120)], fill=(200, 30, 30))
-    draw.text((40, 30), "UkrPulse NEWS", fill="white", font=font_title)
-    draw.text((width - 200, 35), f"{index}/{total}", fill="white", font=font_title)
-    y = 200
-    words = text.split()
+    draw.rectangle([(0, 0), (640, 50)], fill=(200, 30, 30))
+    draw.text((10, 15), f"UKRPULSE NEWS  {index}/{total}", fill="white")
+    y = 70
     line = ""
-    for word in words:
-        test_line = line + " " + word if line else word
-        if len(test_line) > 35:
-            draw.text((60, y), line, fill="white", font=font_text)
-            y += 50
+    for word in text.split():
+        test = line + " " + word if line else word
+        if len(test) > 45:
+            draw.text((20, y), line, fill="white")
+            y += 25
             line = word
         else:
-            line = test_line
+            line = test
     if line:
-        draw.text((60, y), line, fill="white", font=font_text)
-    draw.rectangle([(0, height - 80), (width, height)], fill=(200, 30, 30))
-    draw.text((40, height - 60), "t.me/ukrpulsenew", fill="white", font=font_small)
-    draw.text((width - 300, height - 60), "UkrPulse 2026", fill="white", font=font_small)
-    filename = f"slide_{index}.png"
-    img.save(filename)
-    return filename
+        draw.text((20, y), line, fill="white")
+    draw.rectangle([(0, 320), (640, 360)], fill=(200, 30, 30))
+    draw.text((10, 330), "t.me/ukrpulsenew", fill="white")
+    fname = f"slide_{index}.png"
+    img.save(fname)
+    return fname
 
-def create_video(slides, audio_file, output="digest_video.mp4"):
-    duration_cmd = f"ffprobe -i {audio_file} -show_entries format=duration -v quiet -of csv=p=0"
-    result = subprocess.run(duration_cmd.split(), capture_output=True, text=True)
-    total_duration = float(result.stdout.strip())
-    slide_duration = total_duration / len(slides)
-    list_file = "slides_list.txt"
-    with open(list_file, "w") as f:
-        for slide in slides:
-            f.write(f"file '{slide}'\n")
-            f.write(f"duration {slide_duration}\n")
+def create_video(slides, audio):
+    result = subprocess.run(["ffprobe", "-i", audio, "-show_entries", "format=duration", "-v", "quiet", "-of", "csv=p=0"], capture_output=True, text=True)
+    dur = float(result.stdout.strip())
+    sd = dur / len(slides)
+    with open("list.txt", "w") as f:
+        for s in slides:
+            f.write(f"file '{s}'\nduration {sd}\n")
         f.write(f"file '{slides[-1]}'\n")
-    cmd = f"ffmpeg -y -f concat -safe 0 -i {list_file} -i {audio_file} -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest -vf scale=1080:1920 {output}"
-    subprocess.run(cmd.split())
-    return output
+    cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", "list.txt", "-i", audio, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-shortest", "digest.mp4"]
+    subprocess.run(cmd)
+    return "digest.mp4"
 
-async def create_and_publish_digest():
-    print("Створюю відео-дайджест...")
+async def run():
+    print("Creating video digest...")
     news = load_digest()
     if not news or len(news) < 3:
-        print("Недостатньо новин для дайджесту")
+        print("Not enough news")
         return
     news = news[-7:]
-    print(f"Новин для дайджесту: {len(news)}")
-    print("Створюю сценарій...")
+    print(f"News count: {len(news)}")
     script = create_script(news)
     if not script:
         return
-    print(f"Сценарій:\n{script}\n")
-    print("Створюю аудіо...")
+    print("Script ready")
     audio = create_audio(script)
-    print("Створюю слайди...")
-    slides = []
-    for i, item in enumerate(news):
-        slide = create_slide(item, i + 1, len(news))
-        slides.append(slide)
-    print("Створюю відео...")
+    print("Audio ready")
+    slides = [create_slide(n, i+1, len(news)) for i, n in enumerate(news)]
+    print("Slides ready")
     video = create_video(slides, audio)
-    print("Публікую в Telegram...")
-    with open(video, "rb") as f:
-        await bot.send_video(
-            chat_id=TELEGRAM_CHANNEL,
-            video=f,
-            caption="📺 ВІДЕО-ДАЙДЖЕСТ ДНЯ\n\n🇺🇦 <b>УкрПульс</b>",
-            parse_mode="HTML"
-        )
-    print("✅ Відео-дайджест опубліковано!")
+    print("Video ready")
+    if os.path.exists(video) and os.path.getsize(video) > 0:
+        with open(video, "rb") as f:
+            await bot.send_video(chat_id=TELEGRAM_CHANNEL, video=f, caption="📺 VIDEO DIGEST\n\n🇺🇦 <b>UkrPulse</b>", parse_mode="HTML")
+        print("Published!")
+    else:
+        print("Error: video not created")
     for s in slides:
-        os.remove(s)
-    os.remove(audio)
-    os.remove("slides_list.txt")
+        if os.path.exists(s):
+            os.remove(s)
+    for tmp in ["digest_audio.mp3", "list.txt"]:
+        if os.path.exists(tmp):
+            os.remove(tmp)
 
 if __name__ == "__main__":
-    asyncio.run(create_and_publish_digest())
+    asyncio.run(run())
