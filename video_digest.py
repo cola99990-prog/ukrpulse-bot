@@ -9,7 +9,7 @@ import json
 
 TELEGRAM_BOT_TOKEN = "8462003119:AAEjQU5Tk8Zyo2T36BnmpydAV7zSmdfJz6o"
 TELEGRAM_CHANNEL = "@ukrpulsenew"
-GEMINI_API_KEY = "AIzaSyCAB0k3SKFKjsyUJ0lQY4_rPU3hMKXAJj8"
+GEMINI_API_KEY = "VSTAV_SVIY_KLYUCH"
 DIGEST_FILE = "daily_digest.json"
 
 client_genai = genai.Client(api_key=GEMINI_API_KEY)
@@ -55,8 +55,8 @@ def create_slide(text, index, total):
         draw.text((20, y), line, fill="white")
     draw.rectangle([(0, 320), (640, 360)], fill=(200, 30, 30))
     draw.text((10, 330), "t.me/ukrpulsenew", fill="white")
-    fname = f"slide_{index}.png"
-    img.save(fname)
+    fname = f"slide_{index}.jpg"
+    img.save(fname, format='JPEG', quality=95)
     return fname
 
 def create_video(slides, audio):
@@ -67,7 +67,7 @@ def create_video(slides, audio):
         for s in slides:
             f.write(f"file '{s}'\nduration {sd}\n")
         f.write(f"file '{slides[-1]}'\n")
-    cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", "list.txt", "-i", audio, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-shortest", "digest.mp4"]
+    cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", "list.txt", "-i", audio, "-vf", "format=yuv420p", "-c:v", "libx264", "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-shortest", "digest.mp4"]
     subprocess.run(cmd)
     return "digest.mp4"
 
