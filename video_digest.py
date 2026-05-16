@@ -37,24 +37,24 @@ def create_audio(text):
     return "digest_audio.mp3"
 
 def create_slide(text, index, total):
-    img = Image.new('RGB', (640, 360), color=(10, 10, 40))
+    img = Image.new('RGB', (320, 240), color=(10, 10, 40))
     draw = ImageDraw.Draw(img)
-    draw.rectangle([(0, 0), (640, 50)], fill=(200, 30, 30))
-    draw.text((10, 15), f"UKRPULSE NEWS  {index}/{total}", fill="white")
-    y = 70
+    draw.rectangle([(0, 0), (320, 30)], fill=(200, 30, 30))
+    draw.text((5, 8), f"UKRPULSE {index}/{total}", fill="white")
+    y = 40
     line = ""
     for word in text.split():
         test = line + " " + word if line else word
-        if len(test) > 45:
-            draw.text((20, y), line, fill="white")
-            y += 25
+        if len(test) > 30:
+            draw.text((10, y), line, fill="white")
+            y += 18
             line = word
         else:
             line = test
     if line:
-        draw.text((20, y), line, fill="white")
-    draw.rectangle([(0, 320), (640, 360)], fill=(200, 30, 30))
-    draw.text((10, 330), "t.me/ukrpulsenew", fill="white")
+        draw.text((10, y), line, fill="white")
+    draw.rectangle([(0, 220), (320, 240)], fill=(200, 30, 30))
+    draw.text((5, 224), "t.me/ukrpulsenew", fill="white")
     fname = f"slide_{index}.jpg"
     img.save(fname, format='JPEG', quality=95)
     return fname
@@ -67,7 +67,7 @@ def create_video(slides, audio):
         for s in slides:
             f.write(f"file '{s}'\nduration {sd}\n")
         f.write(f"file '{slides[-1]}'\n")
-    cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", "list.txt", "-i", audio, "-vf", "format=yuv420p", "-c:v", "libx264", "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-shortest", "digest.mp4"]
+    cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", "list.txt", "-i", audio, "-vf", "format=yuv420p", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-shortest", "digest.mp4"]
     subprocess.run(cmd)
     return "digest.mp4"
 
@@ -98,7 +98,7 @@ async def run():
     for s in slides:
         if os.path.exists(s):
             os.remove(s)
-    for tmp in ["digest_audio.mp3", "list.txt"]:
+    for tmp in ["digest_audio.mp3", "list.txt", "digest.mp4"]:
         if os.path.exists(tmp):
             os.remove(tmp)
 
