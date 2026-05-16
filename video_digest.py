@@ -9,7 +9,7 @@ import json
 
 TELEGRAM_BOT_TOKEN = "8462003119:AAEjQU5Tk8Zyo2T36BnmpydAV7zSmdfJz6o"
 TELEGRAM_CHANNEL = "@ukrpulsenew"
-GEMINI_API_KEY = "VSTAV_SVIY_KLYUCH"
+GEMINI_API_KEY = "AIzaSyDM6g-euUKt7S519XXF21U-kvDAx8zGPZk"
 DIGEST_FILE = "daily_digest.json"
 
 client_genai = genai.Client(api_key=GEMINI_API_KEY)
@@ -63,12 +63,20 @@ def create_video(slides, audio):
     result = subprocess.run(["ffprobe", "-i", audio, "-show_entries", "format=duration", "-v", "quiet", "-of", "csv=p=0"], capture_output=True, text=True)
     dur = float(result.stdout.strip())
     sd = dur / len(slides)
-    with open("list.txt", "w") as f:
-        for s in slides:
-            f.write(f"file '{s}'\nduration {sd}\n")
-        f.write(f"file '{slides[-1]}'\n")
-    cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", "list.txt", "-i", audio, "-vf", "format=yuv420p", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-shortest", "digest.mp4"]
-    subprocess.run(cmd)
+    parts = []
+    for i, s in enumerate(slides):
+        part = f"part_{i}.mp4"
+        subprocess.run(["ffmpeg", "-y", "-loop", "1", "-i", s, "-t", str(sd), "-vf", "format=yuv420p", "-c:v", "libx264", "-preset", "ultrafast", "-r", "25", part])
+        parts.append(part)
+    with open("parts.txt", "w") as f:
+        for p in parts:
+            f.write(f"file '{p}'\n")
+    subprocess.run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", "parts.txt", "-i", audio, "-c:v", "copy", "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-shortest", "digest.mp4"])
+    for p in parts:
+        if os.path.exists(p):
+            os.remove(p)
+    if os.path.exists("parts.txt"):
+        os.remove("parts.txt")
     return "digest.mp4"
 
 async def run():
@@ -98,7 +106,7 @@ async def run():
     for s in slides:
         if os.path.exists(s):
             os.remove(s)
-    for tmp in ["digest_audio.mp3", "list.txt", "digest.mp4"]:
+    for tmp in ["digest_audio.mp3", "digest.mp4"]:
         if os.path.exists(tmp):
             os.remove(tmp)
 
