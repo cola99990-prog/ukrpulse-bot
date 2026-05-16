@@ -9,7 +9,7 @@ import json
 
 TELEGRAM_BOT_TOKEN = "8462003119:AAEjQU5Tk8Zyo2T36BnmpydAV7zSmdfJz6o"
 TELEGRAM_CHANNEL = "@ukrpulsenew"
-GEMINI_API_KEY = "AIzaSyDM6g-euUKt7S519XXF21U-kvDAx8zGPZk"
+GEMINI_API_KEY = "AIzaSyAkFW4Avb3bFPZLoxDKQf55x2wyFmzStvY"
 DIGEST_FILE = "daily_digest.json"
 
 client_genai = genai.Client(api_key=GEMINI_API_KEY)
