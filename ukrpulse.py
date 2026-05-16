@@ -8,16 +8,29 @@ import schedule
 import time
 import json
 import os
+import logging
+from datetime import datetime
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(message)s',
+    handlers=[
+        logging.FileHandler("ukrpulse.log", encoding="utf-8"),
+        logging.StreamHandler()
+    ]
+)
+log = logging.info
 
 TELEGRAM_BOT_TOKEN = "8462003119:AAEjQU5Tk8Zyo2T36BnmpydAV7zSmdfJz6o"
 TELEGRAM_CHANNEL = "@ukrpulsenew"
-GEMINI_API_KEY = "AIzaSyBnXh9LpgQKbUZtWFZ-civGwxasyW1pAbg"
+GEMINI_API_KEY = "AIzaSyA247jFZAFURE3p97b8iXISK_daQitDzg4"
 TELEGRAM_API_ID = 30993000
 TELEGRAM_API_HASH = "f2cdb7e84879ea9b285158bc20002a85"
 PUBLISHED_FILE = "published_ids.json"
+PUBLISHED_TEXTS_FILE = "published_texts.json"
+DIGEST_FILE = "daily_digest.json"
 
 SOURCE_CHANNELS = [
-    "@Pravda_Gerashchenko",
     "@ukrainenow",
     "@uniannet",
     "@ukrpravda_news",
@@ -26,29 +39,84 @@ SOURCE_CHANNELS = [
     "@radiosvoboda",
     "@truexanewsua",
     "@dmytrogordon_official",
+    "@Pravda_Gerashchenko",
     "@novini_ukrtg",
 ]
+
+SPAM_WORDS = ["реклама", "розіграш", "промокод", "знижка", "підписуйся", "переходь за посиланням", "giveaway", "promo", "sponsor", "подписывайся", "розыгрыш", "скидка"]
 
 client_genai = genai.Client(api_key=GEMINI_API_KEY)
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
-def load_published_ids():
-    if os.path.exists(PUBLISHED_FILE):
-        with open(PUBLISHED_FILE, "r") as f:
-            return set(json.load(f))
-    return set()
+def load_json(filename):
+    if os.path.exists(filename):
+        with open(filename, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return []
 
-def save_published_ids(ids):
-    with open(PUBLISHED_FILE, "w") as f:
-        json.dump(list(ids), f)
+def save_json(filename, data):
+    with open(filename, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
 
-published_ids = load_published_ids()
-print(f"Завантажено {len(published_ids)} опублікованих новин")
+published_ids = set(load_json(PUBLISHED_FILE))
+published_texts = load_json(PUBLISHED_TEXTS_FILE)
+daily_news = load_json(DIGEST_FILE)
 
-def rewrite_news(text):
-    prompt = """Ти редактор новинного Telegram-каналу УкрПульс.
+if len(published_ids) > 5000:
+    published_ids = set(list(published_ids)[-2000:])
+    save_json(PUBLISHED_FILE, list(published_ids))
+    log(f"Очищено старі ID, залишилось {len(published_ids)}")
+
+log(f"Завантажено {len(published_ids)} ID та {len(published_texts)} текстів")
+
+def is_spam(text):
+    text_lower = text.lower()
+    for word in SPAM_WORDS:
+        if word in text_lower:
+            return True
+    if text_lower.count("http") > 2:
+        return True
+    return False
+
+def is_duplicate(text):
+    keywords = set(text.lower().split())
+    for old_text in published_texts[-200:]:
+        old_keywords = set(old_text.lower().split())
+        if len(old_keywords) == 0:
+            continue
+        common = keywords & old_keywords
+        similarity = len(common) / max(len(keywords), len(old_keywords))
+        if similarity > 0.5:
+            return True
+    return False
+
+def get_category(text):
+    text_lower = text.lower()
+    if any(w in text_lower for w in ["зсу", "фронт", "обстріл", "ракет", "дрон", "удар", "бойов", "окупант", "ппо", "тривога", "загинул"]):
+        return "⚔️ Війна"
+    if any(w in text_lower for w in ["зеленськ", "рада", "кабмін", "закон", "депутат", "парламент", "уряд", "путін", "трамп"]):
+        return "🏛 Політика"
+    if any(w in text_lower for w in ["долар", "гривн", "економік", "бюджет", "інфляц", "ціни", "тариф"]):
+        return "💰 Економіка"
+    if any(w in text_lower for w in ["nato", "нато", "єс", "сша", "китай", "europe", "biden", "trump", "sanctions"]):
+        return "🌍 Світ"
+    return "📰 Новини"
+
+def get_priority(text):
+    text_lower = text.lower()
+    if any(w in text_lower for w in ["терміново", "блискавка", "увага", "тривога", "зліт", "ракет", "обстріл", "загинул", "вибух"]):
+        return "urgent"
+    if any(w in text_lower for w in ["зеленськ", "путін", "трамп", "наступ", "контрнаступ", "обмін полонен"]):
+        return "high"
+    return "normal"
+
+def rewrite_news(text, source_channel=""):
+    category = get_category(text)
+    prompt = f"""Ти редактор новинного Telegram-каналу УкрПульс.
 Перепиши цю новину українською мовою своїми словами.
+Якщо новина англійською або російською — переклади на українську.
 Збережи всі факти але змін формулювання.
+Категорія: {category}
 Формат відповіді:
 - Перший рядок: емодзі + заголовок БЕЗ зірочок і БЕЗ жирного (1 речення)
 - Порожній рядок
@@ -60,90 +128,136 @@ def rewrite_news(text):
 Не пиши нічого зайвого крім самої новини.
 Новина:
 """ + text
+    for attempt in range(3):
+        try:
+            if attempt > 0:
+                wait_time = 30 * (attempt + 1)
+                log(f"Спроба {attempt + 1}, чекаю {wait_time} сек...")
+                time.sleep(wait_time)
+            else:
+                time.sleep(15)
+            response = client_genai.models.generate_content(model="gemini-2.5-flash", contents=prompt)
+            result = response.text
+            result = result.replace("**", "").replace("__", "")
+            if "надайте текст" in result.lower() or "будь ласка" in result.lower() or len(result.strip()) < 30:
+                log("Gemini повернув некоректну відповідь, пропускаю")
+                return None, category
+            return result, category
+        except Exception as e:
+            log(f"Помилка Gemini (спроба {attempt + 1}): {e}")
+    return None, category
+
+def get_source_name(channel):
+    sources = {
+        "@ukrainenow": "Ukraine NOW",
+        "@uniannet": "УНІАН",
+        "@ukrpravda_news": "Українська правда",
+        "@suspilne_news": "Суспільне",
+        "@kyivindependent": "Kyiv Independent",
+        "@radiosvoboda": "Радіо Свобода",
+        "@truexanewsua": "Труха",
+        "@dmytrogordon_official": "Гордон",
+        "@Pravda_Gerashchenko": "Геращенко",
+        "@novini_ukrtg": "Новини UA",
+    }
+    return sources.get(channel, channel)
+
+async def send_daily_digest():
+    global daily_news
+    if not daily_news:
+        return
+    log("Відправляю щоденний дайджест...")
+    digest_text = "📋 ДАЙДЖЕСТ ДНЯ\n\n"
+    for i, news in enumerate(daily_news[-10:], 1):
+        digest_text += f"{i}. {news}\n\n"
+    digest_text += "🇺🇦 <b>УкрПульс — підсумки дня</b>"
     try:
-        time.sleep(15)
-        response = client_genai.models.generate_content(model="gemini-2.5-flash", contents=prompt)
-        result = response.text
-        result = result.replace("**", "").replace("__", "")
-        return result
+        await bot.send_message(chat_id=TELEGRAM_CHANNEL, text=digest_text, parse_mode="HTML")
+        log("✅ Дайджест відправлено!")
+        daily_news = []
+        save_json(DIGEST_FILE, daily_news)
     except Exception as e:
-        print(f"Помилка Gemini: {e}")
-        return None
+        log(f"Помилка дайджесту: {e}")
 
 async def fetch_and_publish():
-    global published_ids
-    print("Перевіряю нові новини...")
+    global published_ids, published_texts, daily_news
+    log("Перевіряю нові новини...")
     async with TelegramClient('ukrpulse_session', TELEGRAM_API_ID, TELEGRAM_API_HASH) as client:
         for channel in SOURCE_CHANNELS:
             try:
                 history = await client(GetHistoryRequest(peer=channel, limit=2, offset_date=None, offset_id=0, max_id=0, min_id=0, add_offset=0, hash=0))
-                print(f"Читаю канал {channel}")
+                log(f"Читаю канал {channel}")
                 for message in history.messages:
                     msg_key = f"{channel}_{message.id}"
                     if msg_key in published_ids:
-                        print(f"Вже опубліковано, пропускаю")
                         continue
-
                     text = message.text or message.message or ""
-                    if len(text) < 30 and not message.media:
+                    if len(text) < 50:
+                        published_ids.add(msg_key)
+                        save_json(PUBLISHED_FILE, list(published_ids))
                         continue
-
-                    print(f"Новина: {text[:80]}")
-
-                    rewritten = rewrite_news(text) if text else None
-                    caption = f"{rewritten}\n\n🇺🇦 <b>УкрПульс</b>" if rewritten else "🇺🇦 <b>УкрПульс</b>"
-
+                    if is_spam(text):
+                        log(f"Реклама, пропускаю: {text[:50]}")
+                        published_ids.add(msg_key)
+                        save_json(PUBLISHED_FILE, list(published_ids))
+                        continue
+                    if is_duplicate(text):
+                        log(f"Дублікат, пропускаю: {text[:50]}")
+                        published_ids.add(msg_key)
+                        save_json(PUBLISHED_FILE, list(published_ids))
+                        continue
+                    priority = get_priority(text)
+                    if priority == "normal":
+                        time.sleep(10)
+                    log(f"[{priority.upper()}] Новина: {text[:80]}")
+                    rewritten, category = rewrite_news(text, channel)
+                    if not rewritten or len(rewritten.strip()) < 30:
+                        published_ids.add(msg_key)
+                        save_json(PUBLISHED_FILE, list(published_ids))
+                        continue
+                    source = get_source_name(channel)
+                    caption = f"{rewritten}\n\n{category} | <i>Джерело: {source}</i>\n🇺🇦 <b>УкрПульс</b>"
                     if isinstance(message.media, MessageMediaPhoto):
-                        print("Завантажую фото...")
+                        log("Завантажую фото...")
                         photo = await client.download_media(message.media, bytes)
-                        await bot.send_photo(
-                            chat_id=TELEGRAM_CHANNEL,
-                            photo=photo,
-                            caption=caption,
-                            parse_mode="HTML"
-                        )
+                        await bot.send_photo(chat_id=TELEGRAM_CHANNEL, photo=photo, caption=caption, parse_mode="HTML")
                     elif isinstance(message.media, MessageMediaDocument):
                         mime = message.media.document.mime_type
                         if "video" in mime:
-                            print("Завантажую відео...")
+                            log("Завантажую відео...")
                             video = await client.download_media(message.media, bytes)
-                            await bot.send_video(
-                                chat_id=TELEGRAM_CHANNEL,
-                                video=video,
-                                caption=caption,
-                                parse_mode="HTML"
-                            )
+                            await bot.send_video(chat_id=TELEGRAM_CHANNEL, video=video, caption=caption, parse_mode="HTML")
                         else:
-                            if rewritten:
-                                await bot.send_message(
-                                    chat_id=TELEGRAM_CHANNEL,
-                                    text=caption,
-                                    parse_mode="HTML"
-                                )
+                            await bot.send_message(chat_id=TELEGRAM_CHANNEL, text=caption, parse_mode="HTML")
                     else:
-                        if rewritten:
-                            await bot.send_message(
-                                chat_id=TELEGRAM_CHANNEL,
-                                text=caption,
-                                parse_mode="HTML"
-                            )
-
+                        await bot.send_message(chat_id=TELEGRAM_CHANNEL, text=caption, parse_mode="HTML")
+                    headline = rewritten.split("\n")[0][:100]
+                    daily_news.append(headline)
+                    save_json(DIGEST_FILE, daily_news)
                     published_ids.add(msg_key)
-                    save_published_ids(published_ids)
-                    print(f"✅ Опубліковано з {channel}")
+                    published_texts.append(text[:200])
+                    if len(published_texts) > 500:
+                        published_texts = published_texts[-300:]
+                    save_json(PUBLISHED_FILE, list(published_ids))
+                    save_json(PUBLISHED_TEXTS_FILE, published_texts)
+                    log(f"✅ Опубліковано з {channel}")
                     await asyncio.sleep(30)
-
             except Exception as e:
-                print(f"Помилка при читанні {channel}: {e}")
+                log(f"Помилка при читанні {channel}: {e}")
+
+def send_digest_sync():
+    asyncio.run(send_daily_digest())
 
 def run_scheduler():
     schedule.every(3).minutes.do(lambda: asyncio.run(fetch_and_publish()))
+    schedule.every().day.at("21:00").do(send_digest_sync)
     while True:
         schedule.run_pending()
         time.sleep(60)
 
 if __name__ == "__main__":
-    print("🚀 УкрПульс бот запущено!")
-    print("Перевірка новин кожні 3 хвилини")
+    log("🚀 УкрПульс бот запущено!")
+    log("Перевірка новин кожні 3 хвилини")
+    log("Дайджест дня о 21:00")
     asyncio.run(fetch_and_publish())
     run_scheduler()
