@@ -21,23 +21,41 @@ def load_digest():
             return json.load(f)
     return []
 
-def create_script(news_list):
+def create_script_and_slides(news_list):
     news_text = "\n".join([f"{i+1}. {n}" for i, n in enumerate(news_list[:7])])
-    prompt = """Напиши сценарій для відеовипуску новин українською мовою.
-Стиль: професійний діктор українського телебачення, впевнений голос.
-Структура:
-- Вступ: Добрий вечір! З вами УкрПульс і головні новини дня.
-- Кожна новина 2-3 речення
-- Завершення: Це були головні новини. Підписуйтесь на УкрПульс. До зустрічі!
-Без зірочок, без дужок, без символів форматування. Тільки живий текст.
+    prompt = """Створи сценарій відеовипуску новин українською.
+Для КОЖНОЇ новини напиши два рядки:
+СЛАЙД: короткий текст для екрану (1 речення, максимум 15 слів)
+ГОЛОС: текст для диктора (2-3 речення, розгорнуто)
+
+Почни з:
+СЛАЙД: Головні новини дня
+ГОЛОС: Добрий вечір! З вами УкрПульс і головні новини дня.
+
+Заверши:
+СЛАЙД: Підписуйтесь на УкрПульс
+ГОЛОС: Це були головні новини. Підписуйтесь на УкрПульс. До зустрічі!
+
+ВАЖЛИВО: текст СЛАЙД повинен бути коротким заголовком новини.
+Текст ГОЛОС повинен детально розповідати цю саму новину.
+Без зірочок, без символів форматування.
 Новини:
 """ + news_text
     try:
         response = client_genai.models.generate_content(model="gemini-2.5-flash", contents=prompt)
-        return response.text.replace("**", "").replace("__", "").replace("*", "")
+        text = response.text.replace("**", "").replace("__", "").replace("*", "")
+        slides_text = []
+        voice_text = ""
+        for line in text.split("\n"):
+            line = line.strip()
+            if line.upper().startswith("СЛАЙД:") or line.upper().startswith("СЛАЙД :"):
+                slides_text.append(line.split(":", 1)[1].strip())
+            elif line.upper().startswith("ГОЛОС:") or line.upper().startswith("ГОЛОС :"):
+                voice_text += line.split(":", 1)[1].strip() + " "
+        return slides_text, voice_text.strip()
     except Exception as e:
         print(f"Gemini error: {e}")
-        return None
+        return None, None
 
 def create_audio(text):
     tts = gTTS(text=text, lang='uk')
@@ -49,47 +67,40 @@ def create_slide(text, index, total):
     img = Image.new('RGB', (w, h), color=(252, 252, 252))
     draw = ImageDraw.Draw(img)
     try:
-        font_logo = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 36)
-        font_num = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 80)
-        font_text = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 28)
-        font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
+        font_logo = ImageFont.truetype("/home/sb619725/NotoSans-Regular.ttf", 72)
+        font_num = ImageFont.truetype("/home/sb619725/NotoSans-Regular.ttf", 160)
+        font_text = ImageFont.truetype("/home/sb619725/NotoSans-Regular.ttf", 52)
+        font_bottom = ImageFont.truetype("/home/sb619725/NotoSans-Regular.ttf", 36)
     except:
-        try:
-            font_logo = ImageFont.truetype("/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf", 36)
-            font_num = ImageFont.truetype("/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf", 80)
-            font_text = ImageFont.truetype("/usr/share/fonts/dejavu/DejaVuSans.ttf", 28)
-            font_small = ImageFont.truetype("/usr/share/fonts/dejavu/DejaVuSans.ttf", 20)
-        except:
-            font_logo = ImageFont.load_default()
-            font_num = font_logo
-            font_text = font_logo
-            font_small = font_logo
-    draw.rectangle([(0, 0), (w, 3)], fill=(30, 30, 30))
-    draw.text((40, 18), "UKRPULSE", fill=(30, 30, 30), font=font_logo)
-    draw.rectangle([(270, 26), (273, 54)], fill=(200, 200, 200))
-    draw.text((290, 18), "NEWS", fill=(160, 160, 160), font=font_logo)
-    draw.line([(40, 65), (w - 40, 65)], fill=(235, 235, 235), width=1)
-    draw.text((40, 85), str(index).zfill(2), fill=(230, 230, 230), font=font_num)
-    draw.rectangle([(40, 178), (110, 181)], fill=(30, 30, 30))
-    y = 200
+        font_logo = ImageFont.load_default()
+        font_num = font_logo
+        font_text = font_logo
+        font_bottom = font_logo
+    draw.rectangle([(0, 0), (w, 6)], fill=(0, 87, 183))
+    draw.text((40, 15), "UKRPULSE", fill=(20, 20, 20), font=font_logo)
+    draw.rectangle([(470, 30), (476, 78)], fill=(0, 87, 183))
+    draw.text((500, 15), "NEWS", fill=(0, 87, 183), font=font_logo)
+    draw.line([(40, 100), (w - 40, 100)], fill=(220, 220, 220), width=2)
+    draw.text((40, 110), str(index).zfill(2), fill=(235, 235, 235), font=font_num)
+    draw.rectangle([(40, 290), (200, 298)], fill=(0, 87, 183))
+    y = 320
     line = ""
     for word in text.split():
         test = line + " " + word if line else word
-        if len(test) > 55:
-            draw.text((40, y), line, fill=(40, 40, 40), font=font_text)
-            y += 38
+        if len(test) > 28:
+            draw.text((40, y), line, fill=(30, 30, 30), font=font_text)
+            y += 65
             line = word
-            if y > 580:
-                draw.text((40, y), "...", fill=(160, 160, 160), font=font_text)
+            if y > 560:
                 break
         else:
             line = test
-    if line and y <= 580:
-        draw.text((40, y), line, fill=(40, 40, 40), font=font_text)
-    draw.line([(40, h - 65), (w - 40, h - 65)], fill=(235, 235, 235), width=1)
-    draw.text((40, h - 48), "t.me/ukrpulsenew", fill=(160, 160, 160), font=font_small)
-    draw.text((w - 220, h - 48), f"NOVYNA {index} Z {total}", fill=(160, 160, 160), font=font_small)
-    draw.rectangle([(0, h - 3), (w, h)], fill=(30, 30, 30))
+    if line and y <= 560:
+        draw.text((40, y), line, fill=(30, 30, 30), font=font_text)
+    draw.rectangle([(0, h - 80), (w, h - 74)], fill=(0, 87, 183))
+    draw.rectangle([(0, h - 74), (w, h)], fill=(20, 20, 20))
+    draw.text((40, h - 65), "t.me/ukrpulsenew", fill=(255, 255, 255), font=font_bottom)
+    draw.text((w - 420, h - 65), f"НОВИНА {index} З {total}", fill=(0, 87, 183), font=font_bottom)
     fname = f"slide_{index}.jpg"
     img.save(fname, format='JPEG', quality=95)
     return fname
@@ -122,13 +133,13 @@ async def run():
         return
     news = news[-7:]
     print(f"News count: {len(news)}")
-    script = create_script(news)
-    if not script:
+    slides_text, voice_text = create_script_and_slides(news)
+    if not slides_text or not voice_text:
         return
-    print("Script ready")
-    audio = create_audio(script)
+    print(f"Script ready: {len(slides_text)} slides")
+    audio = create_audio(voice_text)
     print("Audio ready")
-    slides = [create_slide(n, i+1, len(news)) for i, n in enumerate(news)]
+    slides = [create_slide(t, i+1, len(slides_text)) for i, t in enumerate(slides_text)]
     print("Slides ready")
     video = create_video(slides, audio)
     print("Video ready")
